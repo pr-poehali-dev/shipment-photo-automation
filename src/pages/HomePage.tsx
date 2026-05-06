@@ -1,42 +1,8 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import Icon from "@/components/ui/icon";
-import { Badge } from "@/components/ui/badge";
 
-const SHIPMENTS = [
-  {
-    id: "ОТГ-2024-041",
-    client: "ООО «Техносфера»",
-    date: "05 мая 2026",
-    items: 24,
-    status: "delivered",
-    statusLabel: "Доставлено",
-    amount: "148 500 ₽",
-    photo: null,
-    invoice: null,
-  },
-  {
-    id: "ОТГ-2024-040",
-    client: "ИП Савельев А.Н.",
-    date: "04 мая 2026",
-    items: 6,
-    status: "transit",
-    statusLabel: "В пути",
-    amount: "32 000 ₽",
-    photo: null,
-    invoice: null,
-  },
-  {
-    id: "ОТГ-2024-039",
-    client: "ЗАО «Промлайн»",
-    date: "02 мая 2026",
-    items: 50,
-    status: "pending",
-    statusLabel: "Ожидает",
-    amount: "215 000 ₽",
-    photo: null,
-    invoice: null,
-  },
-];
+const SHIPMENTS_URL = "https://functions.poehali.dev/c127a43a-9fdb-44f6-9204-1ad54dc19e1b";
+const UPLOAD_URL = "https://functions.poehali.dev/8a90c56a-f9fd-41e5-9f8f-c13a91c80dfc";
 
 const STATUS_COLORS: Record<string, string> = {
   delivered: "bg-green-500/15 text-green-400 border-green-500/30",
@@ -44,18 +10,67 @@ const STATUS_COLORS: Record<string, string> = {
   pending: "bg-orange-500/15 text-orange-400 border-orange-500/30",
 };
 
-interface UploadState {
+const STATUS_LABELS: Record<string, string> = {
+  delivered: "Доставлено",
+  transit: "В пути",
+  pending: "Ожидает",
+};
+
+interface ShipmentFile {
+  file_type: "photo" | "invoice";
+  url: string;
+  file_name: string;
+}
+
+interface Shipment {
+  id: string;
+  client: string;
+  date: string;
+  items: number;
+  status: string;
+  amount: string;
+  files: ShipmentFile[];
+}
+
+interface LocalUpload {
   photo: File | null;
   invoice: File | null;
 }
 
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      resolve(result.split(",")[1]);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
 export default function HomePage() {
-  const [uploads, setUploads] = useState<Record<string, UploadState>>({});
+  const [shipments, setShipments] = useState<Shipment[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [localUploads, setLocalUploads] = useState<Record<string, LocalUpload>>({});
   const [showModal, setShowModal] = useState(false);
   const [activeShipment, setActiveShipment] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState<{ id: string; type: string } | null>(null);
   const photoRef = useRef<HTMLInputElement>(null);
   const invoiceRef = useRef<HTMLInputElement>(null);
+
+  const fetchShipments = async () => {
+    setLoading(true);
+    const res = await fetch(SHIPMENTS_URL);
+    const data = await res.json();
+    setShipments(data.shipments || []);
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    fetchShipments();
+  }, []);
 
   const handleOpenUpload = (shipmentId: string) => {
     setActiveShipment(shipmentId);
@@ -63,7 +78,7 @@ export default function HomePage() {
   };
 
   const handleFile = (shipmentId: string, type: "photo" | "invoice", file: File) => {
-    setUploads((prev) => ({
+    setLocalUploads((prev) => ({
       ...prev,
       [shipmentId]: {
         ...(prev[shipmentId] || { photo: null, invoice: null }),
@@ -79,7 +94,50 @@ export default function HomePage() {
     if (file) handleFile(id, type, file);
   };
 
-  const current = uploads[activeShipment || ""] || { photo: null, invoice: null };
+  const handleAttach = async () => {
+    if (!activeShipment) return;
+    const up = localUploads[activeShipment];
+    if (!up?.photo || !up?.invoice) return;
+
+    setUploading(true);
+    const uploadFile = async (file: File, type: "photo" | "invoice") => {
+      const b64 = await fileToBase64(file);
+      await fetch(UPLOAD_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          shipment_id: activeShipment,
+          file_type: type,
+          file_data: b64,
+          file_name: file.name,
+          content_type: file.type || "application/octet-stream",
+        }),
+      });
+    };
+
+    await Promise.all([uploadFile(up.photo, "photo"), uploadFile(up.invoice, "invoice")]);
+    setUploading(false);
+    setShowModal(false);
+    fetchShipments();
+  };
+
+  const current = localUploads[activeShipment || ""] || { photo: null, invoice: null };
+
+  const stats = {
+    total: shipments.length,
+    transit: shipments.filter((s) => s.status === "transit").length,
+    delivered: shipments.filter((s) => s.status === "delivered").length,
+  };
+
+  const getShipmentDocs = (s: Shipment) => {
+    const hasServerPhoto = s.files.some((f) => f.file_type === "photo");
+    const hasServerInvoice = s.files.some((f) => f.file_type === "invoice");
+    const up = localUploads[s.id] || { photo: null, invoice: null };
+    return {
+      hasPhoto: hasServerPhoto || !!up.photo,
+      hasInvoice: hasServerInvoice || !!up.invoice,
+    };
+  };
 
   return (
     <div className="space-y-6">
@@ -101,9 +159,9 @@ export default function HomePage() {
       {/* Stats row */}
       <div className="grid grid-cols-3 gap-3 animate-fade-in delay-100">
         {[
-          { label: "Всего", value: "41", icon: "Package", color: "text-primary" },
-          { label: "В пути", value: "7", icon: "Truck", color: "text-yellow-400" },
-          { label: "Доставлено", value: "34", icon: "CheckCircle", color: "text-green-400" },
+          { label: "Всего", value: String(stats.total), icon: "Package", color: "text-primary" },
+          { label: "В пути", value: String(stats.transit), icon: "Truck", color: "text-yellow-400" },
+          { label: "Доставлено", value: String(stats.delivered), icon: "CheckCircle", color: "text-green-400" },
         ].map((s) => (
           <div key={s.label} className="bg-card rounded-xl p-4 border border-border card-hover">
             <div className="flex items-center gap-2 mb-1">
@@ -117,77 +175,74 @@ export default function HomePage() {
 
       {/* Shipments list */}
       <div className="space-y-3">
-        {SHIPMENTS.map((s, i) => {
-          const up = uploads[s.id] || { photo: null, invoice: null };
-          const hasAll = up.photo && up.invoice;
-          return (
-            <div
-              key={s.id}
-              className="bg-card border border-border rounded-xl p-4 card-hover animate-fade-in"
-              style={{ animationDelay: `${0.15 + i * 0.08}s` }}
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-semibold text-white text-sm font-montserrat">{s.id}</span>
-                    <span
-                      className={`text-xs px-2 py-0.5 rounded-full border font-medium ${STATUS_COLORS[s.status]}`}
-                    >
-                      {s.statusLabel}
-                    </span>
+        {loading ? (
+          Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="bg-card border border-border rounded-xl p-4 animate-pulse h-24" />
+          ))
+        ) : (
+          shipments.map((s, i) => {
+            const { hasPhoto, hasInvoice } = getShipmentDocs(s);
+            const hasAll = hasPhoto && hasInvoice;
+            return (
+              <div
+                key={s.id}
+                className="bg-card border border-border rounded-xl p-4 card-hover animate-fade-in"
+                style={{ animationDelay: `${0.1 + i * 0.06}s` }}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-semibold text-white text-sm font-montserrat">{s.id}</span>
+                      <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${STATUS_COLORS[s.status] || "bg-secondary text-secondary-foreground border-border"}`}>
+                        {STATUS_LABELS[s.status] || s.status}
+                      </span>
+                    </div>
+                    <div className="text-muted-foreground text-sm mt-1 truncate">{s.client}</div>
+                    <div className="flex items-center gap-3 mt-2 text-xs text-muted-foreground">
+                      <span className="flex items-center gap-1">
+                        <Icon name="Calendar" size={12} />
+                        {s.date}
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <Icon name="Boxes" size={12} />
+                        {s.items} поз.
+                      </span>
+                      <span className="flex items-center gap-1 text-primary font-semibold">
+                        <Icon name="Banknote" size={12} />
+                        {s.amount}
+                      </span>
+                    </div>
                   </div>
-                  <div className="text-muted-foreground text-sm mt-1 truncate">{s.client}</div>
-                  <div className="flex items-center gap-3 mt-2 text-xs text-muted-foreground">
-                    <span className="flex items-center gap-1">
-                      <Icon name="Calendar" size={12} />
-                      {s.date}
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <Icon name="Boxes" size={12} />
-                      {s.items} поз.
-                    </span>
-                    <span className="flex items-center gap-1 text-primary font-semibold">
-                      <Icon name="Banknote" size={12} />
-                      {s.amount}
-                    </span>
-                  </div>
-                </div>
 
-                {/* Upload status + button */}
-                <div className="flex flex-col items-end gap-2 shrink-0">
-                  <div className="flex items-center gap-1.5">
-                    <span
-                      className={`w-2 h-2 rounded-full ${up.photo ? "bg-green-400" : "bg-border"}`}
-                      title="Фото товара"
-                    />
-                    <span
-                      className={`w-2 h-2 rounded-full ${up.invoice ? "bg-green-400" : "bg-border"}`}
-                      title="Счёт"
-                    />
+                  <div className="flex flex-col items-end gap-2 shrink-0">
+                    <div className="flex items-center gap-1.5">
+                      <span className={`w-2 h-2 rounded-full ${hasPhoto ? "bg-green-400" : "bg-border"}`} title="Фото товара" />
+                      <span className={`w-2 h-2 rounded-full ${hasInvoice ? "bg-green-400" : "bg-border"}`} title="Счёт" />
+                    </div>
+                    <button
+                      onClick={() => handleOpenUpload(s.id)}
+                      className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium transition-all ${
+                        hasAll
+                          ? "bg-green-500/15 text-green-400 border border-green-500/30"
+                          : "bg-primary/10 text-primary border border-primary/30 hover:bg-primary/20"
+                      }`}
+                    >
+                      <Icon name={hasAll ? "CheckCircle" : "Upload"} size={13} />
+                      {hasAll ? "Загружено" : "Загрузить"}
+                    </button>
                   </div>
-                  <button
-                    onClick={() => handleOpenUpload(s.id)}
-                    className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium transition-all ${
-                      hasAll
-                        ? "bg-green-500/15 text-green-400 border border-green-500/30"
-                        : "bg-primary/10 text-primary border border-primary/30 hover:bg-primary/20"
-                    }`}
-                  >
-                    <Icon name={hasAll ? "CheckCircle" : "Upload"} size={13} />
-                    {hasAll ? "Загружено" : "Загрузить"}
-                  </button>
                 </div>
               </div>
-            </div>
-          );
-        })}
+            );
+          })
+        )}
       </div>
 
       {/* Upload Modal */}
       {showModal && activeShipment && (
         <div
           className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in"
-          onClick={(e) => e.target === e.currentTarget && setShowModal(false)}
+          onClick={(e) => e.target === e.currentTarget && !uploading && setShowModal(false)}
         >
           <div className="bg-card border border-border rounded-2xl w-full max-w-md animate-scale-in">
             <div className="flex items-center justify-between p-5 border-b border-border">
@@ -196,7 +251,7 @@ export default function HomePage() {
                 <p className="text-muted-foreground text-xs mt-0.5">{activeShipment}</p>
               </div>
               <button
-                onClick={() => setShowModal(false)}
+                onClick={() => !uploading && setShowModal(false)}
                 className="w-8 h-8 flex items-center justify-center rounded-lg bg-secondary hover:bg-secondary/70 transition-colors"
               >
                 <Icon name="X" size={16} />
@@ -206,29 +261,20 @@ export default function HomePage() {
             <div className="p-5 space-y-4">
               {/* Photo upload */}
               <div>
-                <label className="block text-sm font-medium text-white mb-2">
-                  Фото товара
-                </label>
+                <label className="block text-sm font-medium text-white mb-2">Фото товара</label>
                 <div
-                  className={`upload-zone rounded-xl p-4 text-center cursor-pointer ${
-                    dragOver?.id === activeShipment && dragOver.type === "photo" ? "drag-over" : ""
-                  }`}
+                  className={`upload-zone rounded-xl p-4 text-center cursor-pointer ${dragOver?.id === activeShipment && dragOver.type === "photo" ? "drag-over" : ""}`}
                   onDragOver={(e) => { e.preventDefault(); setDragOver({ id: activeShipment, type: "photo" }); }}
                   onDragLeave={() => setDragOver(null)}
                   onDrop={(e) => handleDrop(e, activeShipment, "photo")}
                   onClick={() => photoRef.current?.click()}
                 >
-                  <input
-                    ref={photoRef}
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={(e) => e.target.files?.[0] && handleFile(activeShipment, "photo", e.target.files[0])}
-                  />
+                  <input ref={photoRef} type="file" accept="image/*" className="hidden"
+                    onChange={(e) => e.target.files?.[0] && handleFile(activeShipment, "photo", e.target.files[0])} />
                   {current.photo ? (
                     <div className="flex items-center justify-center gap-2 text-green-400">
                       <Icon name="CheckCircle" size={18} />
-                      <span className="text-sm font-medium">{current.photo.name}</span>
+                      <span className="text-sm font-medium truncate max-w-[200px]">{current.photo.name}</span>
                     </div>
                   ) : (
                     <div className="flex flex-col items-center gap-2 py-2">
@@ -243,29 +289,20 @@ export default function HomePage() {
 
               {/* Invoice upload */}
               <div>
-                <label className="block text-sm font-medium text-white mb-2">
-                  Счёт / накладная
-                </label>
+                <label className="block text-sm font-medium text-white mb-2">Счёт / накладная</label>
                 <div
-                  className={`upload-zone rounded-xl p-4 text-center cursor-pointer ${
-                    dragOver?.id === activeShipment && dragOver.type === "invoice" ? "drag-over" : ""
-                  }`}
+                  className={`upload-zone rounded-xl p-4 text-center cursor-pointer ${dragOver?.id === activeShipment && dragOver.type === "invoice" ? "drag-over" : ""}`}
                   onDragOver={(e) => { e.preventDefault(); setDragOver({ id: activeShipment, type: "invoice" }); }}
                   onDragLeave={() => setDragOver(null)}
                   onDrop={(e) => handleDrop(e, activeShipment, "invoice")}
                   onClick={() => invoiceRef.current?.click()}
                 >
-                  <input
-                    ref={invoiceRef}
-                    type="file"
-                    accept="image/*,.pdf"
-                    className="hidden"
-                    onChange={(e) => e.target.files?.[0] && handleFile(activeShipment, "invoice", e.target.files[0])}
-                  />
+                  <input ref={invoiceRef} type="file" accept="image/*,.pdf" className="hidden"
+                    onChange={(e) => e.target.files?.[0] && handleFile(activeShipment, "invoice", e.target.files[0])} />
                   {current.invoice ? (
                     <div className="flex items-center justify-center gap-2 text-green-400">
                       <Icon name="CheckCircle" size={18} />
-                      <span className="text-sm font-medium">{current.invoice.name}</span>
+                      <span className="text-sm font-medium truncate max-w-[200px]">{current.invoice.name}</span>
                     </div>
                   ) : (
                     <div className="flex flex-col items-center gap-2 py-2">
@@ -281,17 +318,25 @@ export default function HomePage() {
 
             <div className="p-5 pt-0 flex gap-3">
               <button
-                onClick={() => setShowModal(false)}
-                className="flex-1 bg-secondary text-secondary-foreground px-4 py-2.5 rounded-lg text-sm font-medium hover:bg-secondary/70 transition-colors"
+                onClick={() => !uploading && setShowModal(false)}
+                disabled={uploading}
+                className="flex-1 bg-secondary text-secondary-foreground px-4 py-2.5 rounded-lg text-sm font-medium hover:bg-secondary/70 transition-colors disabled:opacity-40"
               >
                 Отмена
               </button>
               <button
-                onClick={() => setShowModal(false)}
-                disabled={!current.photo || !current.invoice}
-                className="flex-1 bg-primary text-primary-foreground px-4 py-2.5 rounded-lg text-sm font-semibold hover:bg-primary/90 transition-all disabled:opacity-40 disabled:cursor-not-allowed glow-orange-sm"
+                onClick={handleAttach}
+                disabled={!current.photo || !current.invoice || uploading}
+                className="flex-1 bg-primary text-primary-foreground px-4 py-2.5 rounded-lg text-sm font-semibold hover:bg-primary/90 transition-all disabled:opacity-40 disabled:cursor-not-allowed glow-orange-sm flex items-center justify-center gap-2"
               >
-                Прикрепить
+                {uploading ? (
+                  <>
+                    <Icon name="Loader" size={14} className="animate-spin" />
+                    Загружаю...
+                  </>
+                ) : (
+                  "Прикрепить"
+                )}
               </button>
             </div>
           </div>
