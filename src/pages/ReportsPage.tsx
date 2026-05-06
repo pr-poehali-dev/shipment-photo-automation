@@ -1,20 +1,20 @@
 import Icon from "@/components/ui/icon";
 
 const MONTHLY = [
-  { month: "Янв", count: 18, amount: 420 },
-  { month: "Фев", count: 22, amount: 510 },
-  { month: "Мар", count: 15, amount: 380 },
-  { month: "Апр", count: 30, amount: 720 },
-  { month: "Май", count: 41, amount: 890 },
+  { month: "Янв", count: 18 },
+  { month: "Фев", count: 22 },
+  { month: "Мар", count: 15 },
+  { month: "Апр", count: 30 },
+  { month: "Май", count: 41 },
 ];
 
-const max = Math.max(...MONTHLY.map((m) => m.amount));
+const max = Math.max(...MONTHLY.map((m) => m.count));
 
 const TOP_CLIENTS = [
-  { name: "ООО «Техносфера»", shipments: 12, amount: "384 000 ₽" },
-  { name: "ЗАО «Промлайн»", shipments: 9, amount: "280 000 ₽" },
-  { name: "ИП Савельев А.Н.", shipments: 7, amount: "168 000 ₽" },
-  { name: "ООО «Горизонт»", shipments: 5, amount: "115 000 ₽" },
+  { name: "ООО «Техносфера»", shipments: 12 },
+  { name: "ЗАО «Промлайн»", shipments: 9 },
+  { name: "ИП Савельев А.Н.", shipments: 7 },
+  { name: "ООО «Горизонт»", shipments: 5 },
 ];
 
 export default function ReportsPage() {
@@ -28,9 +28,9 @@ export default function ReportsPage() {
       {/* KPI cards */}
       <div className="grid grid-cols-2 gap-3 animate-fade-in delay-100">
         {[
-          { label: "Выручка (май)", value: "890 000 ₽", delta: "+24%", icon: "TrendingUp", up: true },
           { label: "Отгрузок (май)", value: "41", delta: "+37%", icon: "Package", up: true },
-          { label: "Ср. чек", value: "21 700 ₽", delta: "+8%", icon: "Banknote", up: true },
+          { label: "В пути", value: "7", delta: "+2", icon: "Truck", up: true },
+          { label: "Доставлено", value: "34", delta: "+21%", icon: "CheckCircle", up: true },
           { label: "Без документов", value: "3", delta: "–2", icon: "AlertCircle", up: false },
         ].map((k) => (
           <div key={k.label} className="bg-card border border-border rounded-xl p-4 card-hover">
@@ -38,9 +38,7 @@ export default function ReportsPage() {
               <Icon name={k.icon} size={16} className={k.up ? "text-primary" : "text-red-400"} />
               <span
                 className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
-                  k.up
-                    ? "bg-green-500/15 text-green-400"
-                    : "bg-red-500/15 text-red-400"
+                  k.up ? "bg-green-500/15 text-green-400" : "bg-red-500/15 text-red-400"
                 }`}
               >
                 {k.delta}
@@ -55,22 +53,20 @@ export default function ReportsPage() {
       {/* Bar chart */}
       <div className="bg-card border border-border rounded-2xl p-5 animate-fade-in delay-200">
         <div className="flex items-center justify-between mb-5">
-          <h3 className="font-bold font-montserrat text-white text-sm">Выручка по месяцам</h3>
-          <span className="text-xs text-muted-foreground">тыс. ₽</span>
+          <h3 className="font-bold font-montserrat text-white text-sm">Отгрузки по месяцам</h3>
+          <span className="text-xs text-muted-foreground">шт.</span>
         </div>
         <div className="flex items-end gap-3 h-36">
           {MONTHLY.map((m, i) => {
             const isLast = i === MONTHLY.length - 1;
-            const height = Math.round((m.amount / max) * 100);
+            const height = Math.round((m.count / max) * 100);
             return (
               <div key={m.month} className="flex-1 flex flex-col items-center gap-1.5">
-                <span className="text-xs text-muted-foreground">{m.amount}</span>
+                <span className="text-xs text-muted-foreground">{m.count}</span>
                 <div className="w-full relative" style={{ height: `${height}%` }}>
                   <div
                     className={`w-full h-full rounded-t-lg transition-all ${
-                      isLast
-                        ? "bg-primary glow-orange"
-                        : "bg-secondary hover:bg-secondary/70"
+                      isLast ? "bg-primary glow-orange" : "bg-secondary hover:bg-secondary/70"
                     }`}
                     style={{ minHeight: 8 }}
                   />
@@ -100,7 +96,6 @@ export default function ReportsPage() {
                 <p className="text-sm text-white font-medium truncate">{c.name}</p>
                 <p className="text-xs text-muted-foreground">{c.shipments} отгрузок</p>
               </div>
-              <span className="text-sm font-semibold text-primary font-montserrat">{c.amount}</span>
             </div>
           ))}
         </div>

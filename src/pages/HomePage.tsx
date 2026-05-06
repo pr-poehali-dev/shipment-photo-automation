@@ -28,7 +28,6 @@ interface Shipment {
   date: string;
   items: number;
   status: string;
-  amount: string;
   files: ShipmentFile[];
 }
 
@@ -56,7 +55,6 @@ interface NewShipmentForm {
   client: string;
   date: string;
   items: string;
-  amount: string;
   status: string;
 }
 
@@ -72,7 +70,7 @@ export default function HomePage() {
   const invoiceRef = useRef<HTMLInputElement>(null);
 
   const [showNewModal, setShowNewModal] = useState(false);
-  const [newForm, setNewForm] = useState<NewShipmentForm>({ id: "", client: "", date: TODAY, items: "", amount: "", status: "pending" });
+  const [newForm, setNewForm] = useState<NewShipmentForm>({ id: "", client: "", date: TODAY, items: "", status: "pending" });
   const [newSaving, setNewSaving] = useState(false);
   const [newError, setNewError] = useState("");
 
@@ -103,7 +101,6 @@ export default function HomePage() {
         client: newForm.client.trim(),
         date: newForm.date.trim(),
         items: parseInt(newForm.items) || 0,
-        amount: newForm.amount.trim() || "0 ₽",
         status: newForm.status,
       }),
     });
@@ -114,7 +111,7 @@ export default function HomePage() {
       return;
     }
     setShowNewModal(false);
-    setNewForm({ id: "", client: "", date: TODAY, items: "", amount: "", status: "pending" });
+    setNewForm({ id: "", client: "", date: TODAY, items: "", status: "pending" });
     fetchShipments();
   };
 
@@ -253,10 +250,7 @@ export default function HomePage() {
                         <Icon name="Boxes" size={12} />
                         {s.items} поз.
                       </span>
-                      <span className="flex items-center gap-1 text-primary font-semibold">
-                        <Icon name="Banknote" size={12} />
-                        {s.amount}
-                      </span>
+
                     </div>
                   </div>
 
@@ -446,28 +440,17 @@ export default function HomePage() {
                   />
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-muted-foreground mb-1">Сумма</label>
-                  <input
-                    className="w-full bg-secondary border border-border rounded-lg px-3 py-2.5 text-sm text-white placeholder:text-muted-foreground focus:outline-none focus:border-primary transition-colors"
-                    placeholder="0 ₽"
-                    value={newForm.amount}
-                    onChange={(e) => setNewForm((f) => ({ ...f, amount: e.target.value }))}
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-muted-foreground mb-1">Статус</label>
-                  <select
-                    className="w-full bg-secondary border border-border rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-primary transition-colors"
-                    value={newForm.status}
-                    onChange={(e) => setNewForm((f) => ({ ...f, status: e.target.value }))}
-                  >
-                    <option value="pending">Ожидает</option>
-                    <option value="transit">В пути</option>
-                    <option value="delivered">Доставлено</option>
-                  </select>
-                </div>
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">Статус</label>
+                <select
+                  className="w-full bg-secondary border border-border rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-primary transition-colors"
+                  value={newForm.status}
+                  onChange={(e) => setNewForm((f) => ({ ...f, status: e.target.value }))}
+                >
+                  <option value="pending">Ожидает</option>
+                  <option value="transit">В пути</option>
+                  <option value="delivered">Доставлено</option>
+                </select>
               </div>
               {newError && (
                 <p className="text-xs text-red-400 flex items-center gap-1.5">

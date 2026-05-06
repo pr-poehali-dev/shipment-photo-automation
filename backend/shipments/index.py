@@ -27,7 +27,7 @@ def handler(event: dict, context) -> dict:
         conn = get_conn()
         cur = conn.cursor()
         cur.execute(
-            f"SELECT id, client, date, items, status, amount, created_at FROM {SCHEMA}.shipments ORDER BY created_at DESC"
+            f"SELECT id, client, date, items, status, created_at FROM {SCHEMA}.shipments ORDER BY created_at DESC"
         )
         rows = cur.fetchall()
         shipments = []
@@ -44,7 +44,6 @@ def handler(event: dict, context) -> dict:
                 'date': row[2],
                 'items': row[3],
                 'status': row[4],
-                'amount': row[5],
                 'files': files,
             })
         cur.close()
@@ -62,7 +61,6 @@ def handler(event: dict, context) -> dict:
         date = body.get('date')
         items = body.get('items', 0)
         status = body.get('status', 'pending')
-        amount = body.get('amount', '0 ₽')
 
         if not all([sid, client, date]):
             return {
@@ -74,8 +72,8 @@ def handler(event: dict, context) -> dict:
         conn = get_conn()
         cur = conn.cursor()
         cur.execute(
-            f"INSERT INTO {SCHEMA}.shipments (id, client, date, items, status, amount) VALUES (%s, %s, %s, %s, %s, %s) ON CONFLICT (id) DO NOTHING RETURNING id",
-            (sid, client, date, items, status, amount),
+            f"INSERT INTO {SCHEMA}.shipments (id, client, date, items, status) VALUES (%s, %s, %s, %s, %s) ON CONFLICT (id) DO NOTHING RETURNING id",
+            (sid, client, date, items, status),
         )
         result = cur.fetchone()
         conn.commit()

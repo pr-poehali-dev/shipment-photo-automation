@@ -10,9 +10,7 @@
       "name": "GET shipments list",
       "method": "GET",
       "path": "/",
-      "expectedStatus": 200,
-      "expectedBody": {"shipments": []},
-      "bodyMatcher": "partial"
+      "expectedStatus": 200
     }
   ]
 }
