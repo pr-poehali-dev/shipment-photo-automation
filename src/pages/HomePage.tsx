@@ -16,6 +16,13 @@ const STATUS_LABELS: Record<string, string> = {
   pending: "Ожидает",
 };
 
+const FILTERS = [
+  { key: "all", label: "Все" },
+  { key: "pending", label: "Ожидает" },
+  { key: "transit", label: "В пути" },
+  { key: "delivered", label: "Доставлено" },
+];
+
 interface ShipmentFile {
   file_type: "photo" | "invoice";
   url: string;
@@ -39,10 +46,7 @@ interface LocalUpload {
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = () => {
-      const result = reader.result as string;
-      resolve(result.split(",")[1]);
-    };
+    reader.onload = () => resolve((reader.result as string).split(",")[1]);
     reader.onerror = reject;
     reader.readAsDataURL(file);
   });
@@ -61,18 +65,26 @@ interface NewShipmentForm {
 export default function HomePage() {
   const [shipments, setShipments] = useState<Shipment[]>([]);
   const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState("all");
+
+  // Upload modal
   const [localUploads, setLocalUploads] = useState<Record<string, LocalUpload>>({});
-  const [showModal, setShowModal] = useState(false);
+  const [showUploadModal, setShowUploadModal] = useState(false);
   const [activeShipment, setActiveShipment] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState<{ id: string; type: string } | null>(null);
   const photoRef = useRef<HTMLInputElement>(null);
   const invoiceRef = useRef<HTMLInputElement>(null);
 
+  // New shipment modal
   const [showNewModal, setShowNewModal] = useState(false);
   const [newForm, setNewForm] = useState<NewShipmentForm>({ id: "", client: "", date: TODAY, items: "", status: "pending" });
   const [newSaving, setNewSaving] = useState(false);
   const [newError, setNewError] = useState("");
+
+  // View files modal
+  const [viewShipment, setViewShipment] = useState<Shipment | null>(null);
+  const [viewImg, setViewImg] = useState<string | null>(null);
 
   const fetchShipments = async () => {
     setLoading(true);
@@ -82,10 +94,9 @@ export default function HomePage() {
     setLoading(false);
   };
 
-  useEffect(() => {
-    fetchShipments();
-  }, []);
+  useEffect(() => { fetchShipments(); }, []);
 
+  // Create shipment
   const handleCreateShipment = async () => {
     if (!newForm.id.trim() || !newForm.client.trim() || !newForm.date.trim()) {
       setNewError("Заполните номер, клиента и дату");
@@ -106,27 +117,17 @@ export default function HomePage() {
     });
     const data = await res.json();
     setNewSaving(false);
-    if (!res.ok) {
-      setNewError(data.error || "Ошибка при создании");
-      return;
-    }
+    if (!res.ok) { setNewError(data.error || "Ошибка при создании"); return; }
     setShowNewModal(false);
     setNewForm({ id: "", client: "", date: TODAY, items: "", status: "pending" });
     fetchShipments();
   };
 
-  const handleOpenUpload = (shipmentId: string) => {
-    setActiveShipment(shipmentId);
-    setShowModal(true);
-  };
-
+  // Upload files
   const handleFile = (shipmentId: string, type: "photo" | "invoice", file: File) => {
     setLocalUploads((prev) => ({
       ...prev,
-      [shipmentId]: {
-        ...(prev[shipmentId] || { photo: null, invoice: null }),
-        [type]: file,
-      },
+      [shipmentId]: { ...(prev[shipmentId] || { photo: null, invoice: null }), [type]: file },
     }));
   };
 
@@ -141,30 +142,32 @@ export default function HomePage() {
     if (!activeShipment) return;
     const up = localUploads[activeShipment];
     if (!up?.photo || !up?.invoice) return;
-
     setUploading(true);
     const uploadFile = async (file: File, type: "photo" | "invoice") => {
       const b64 = await fileToBase64(file);
       await fetch(UPLOAD_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          shipment_id: activeShipment,
-          file_type: type,
-          file_data: b64,
-          file_name: file.name,
-          content_type: file.type || "application/octet-stream",
-        }),
+        body: JSON.stringify({ shipment_id: activeShipment, file_type: type, file_data: b64, file_name: file.name, content_type: file.type || "image/jpeg" }),
       });
     };
-
     await Promise.all([uploadFile(up.photo, "photo"), uploadFile(up.invoice, "invoice")]);
     setUploading(false);
-    setShowModal(false);
+    setShowUploadModal(false);
     fetchShipments();
   };
 
   const current = localUploads[activeShipment || ""] || { photo: null, invoice: null };
+
+  const getShipmentDocs = (s: Shipment) => {
+    const up = localUploads[s.id] || { photo: null, invoice: null };
+    return {
+      hasPhoto: s.files.some((f) => f.file_type === "photo") || !!up.photo,
+      hasInvoice: s.files.some((f) => f.file_type === "invoice") || !!up.invoice,
+    };
+  };
+
+  const filtered = filter === "all" ? shipments : shipments.filter((s) => s.status === filter);
 
   const stats = {
     total: shipments.length,
@@ -172,47 +175,58 @@ export default function HomePage() {
     delivered: shipments.filter((s) => s.status === "delivered").length,
   };
 
-  const getShipmentDocs = (s: Shipment) => {
-    const hasServerPhoto = s.files.some((f) => f.file_type === "photo");
-    const hasServerInvoice = s.files.some((f) => f.file_type === "invoice");
-    const up = localUploads[s.id] || { photo: null, invoice: null };
-    return {
-      hasPhoto: hasServerPhoto || !!up.photo,
-      hasInvoice: hasServerInvoice || !!up.invoice,
-    };
-  };
-
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       {/* Header */}
       <div className="flex items-center justify-between animate-fade-in">
         <div>
           <h1 className="text-2xl font-montserrat font-bold text-white">Отгрузки</h1>
-          <p className="text-muted-foreground text-sm mt-0.5">Все активные и завершённые отгрузки</p>
+          <p className="text-muted-foreground text-sm mt-0.5">Все активные и завершённые</p>
         </div>
         <button
-          className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-lg font-semibold text-sm hover:bg-primary/90 transition-all glow-orange-sm hover:glow-orange"
+          className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-lg font-semibold text-sm hover:bg-primary/90 transition-all glow-orange-sm"
           onClick={() => { setNewError(""); setShowNewModal(true); }}
         >
           <Icon name="Plus" size={16} />
-          Новая отгрузка
+          Новая
         </button>
       </div>
 
       {/* Stats row */}
       <div className="grid grid-cols-3 gap-3 animate-fade-in delay-100">
         {[
-          { label: "Всего", value: String(stats.total), icon: "Package", color: "text-primary" },
-          { label: "В пути", value: String(stats.transit), icon: "Truck", color: "text-yellow-400" },
-          { label: "Доставлено", value: String(stats.delivered), icon: "CheckCircle", color: "text-green-400" },
+          { label: "Всего", value: String(stats.total), icon: "Package", color: "text-primary", filterKey: "all" },
+          { label: "В пути", value: String(stats.transit), icon: "Truck", color: "text-yellow-400", filterKey: "transit" },
+          { label: "Доставлено", value: String(stats.delivered), icon: "CheckCircle", color: "text-green-400", filterKey: "delivered" },
         ].map((s) => (
-          <div key={s.label} className="bg-card rounded-xl p-4 border border-border card-hover">
+          <button
+            key={s.label}
+            onClick={() => setFilter(filter === s.filterKey ? "all" : s.filterKey)}
+            className={`bg-card rounded-xl p-4 border transition-all text-left card-hover ${filter === s.filterKey ? "border-primary/50 glow-orange-sm" : "border-border"}`}
+          >
             <div className="flex items-center gap-2 mb-1">
               <Icon name={s.icon} size={16} className={s.color} />
               <span className="text-xs text-muted-foreground">{s.label}</span>
             </div>
             <div className={`text-2xl font-bold font-montserrat ${s.color}`}>{s.value}</div>
-          </div>
+          </button>
+        ))}
+      </div>
+
+      {/* Filter tabs */}
+      <div className="flex gap-2 overflow-x-auto pb-1 animate-fade-in delay-100">
+        {FILTERS.map((f) => (
+          <button
+            key={f.key}
+            onClick={() => setFilter(f.key)}
+            className={`shrink-0 text-xs px-3 py-1.5 rounded-full font-medium transition-all ${
+              filter === f.key
+                ? "bg-primary text-primary-foreground"
+                : "bg-secondary text-muted-foreground hover:text-white"
+            }`}
+          >
+            {f.label}
+          </button>
         ))}
       </div>
 
@@ -222,15 +236,20 @@ export default function HomePage() {
           Array.from({ length: 3 }).map((_, i) => (
             <div key={i} className="bg-card border border-border rounded-xl p-4 animate-pulse h-24" />
           ))
+        ) : filtered.length === 0 ? (
+          <div className="text-center py-12 text-muted-foreground text-sm">
+            <Icon name="PackageOpen" size={32} className="mx-auto mb-3 opacity-30" />
+            Нет отгрузок
+          </div>
         ) : (
-          shipments.map((s, i) => {
+          filtered.map((s, i) => {
             const { hasPhoto, hasInvoice } = getShipmentDocs(s);
             const hasAll = hasPhoto && hasInvoice;
             return (
               <div
                 key={s.id}
                 className="bg-card border border-border rounded-xl p-4 card-hover animate-fade-in"
-                style={{ animationDelay: `${0.1 + i * 0.06}s` }}
+                style={{ animationDelay: `${0.05 + i * 0.05}s` }}
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex-1 min-w-0">
@@ -250,26 +269,33 @@ export default function HomePage() {
                         <Icon name="Boxes" size={12} />
                         {s.items} поз.
                       </span>
-
                     </div>
                   </div>
 
                   <div className="flex flex-col items-end gap-2 shrink-0">
+                    {/* dots */}
                     <div className="flex items-center gap-1.5">
-                      <span className={`w-2 h-2 rounded-full ${hasPhoto ? "bg-green-400" : "bg-border"}`} title="Фото товара" />
+                      <span className={`w-2 h-2 rounded-full ${hasPhoto ? "bg-green-400" : "bg-border"}`} title="Фото" />
                       <span className={`w-2 h-2 rounded-full ${hasInvoice ? "bg-green-400" : "bg-border"}`} title="Счёт" />
                     </div>
-                    <button
-                      onClick={() => handleOpenUpload(s.id)}
-                      className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium transition-all ${
-                        hasAll
-                          ? "bg-green-500/15 text-green-400 border border-green-500/30"
-                          : "bg-primary/10 text-primary border border-primary/30 hover:bg-primary/20"
-                      }`}
-                    >
-                      <Icon name={hasAll ? "CheckCircle" : "Upload"} size={13} />
-                      {hasAll ? "Загружено" : "Загрузить"}
-                    </button>
+                    {/* view or upload */}
+                    {hasAll ? (
+                      <button
+                        onClick={() => setViewShipment(s)}
+                        className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium bg-green-500/15 text-green-400 border border-green-500/30 hover:bg-green-500/25 transition-all"
+                      >
+                        <Icon name="Eye" size={13} />
+                        Смотреть
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => { setActiveShipment(s.id); setShowUploadModal(true); }}
+                        className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium bg-primary/10 text-primary border border-primary/30 hover:bg-primary/20 transition-all"
+                      >
+                        <Icon name="Upload" size={13} />
+                        Загрузить
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
@@ -278,11 +304,85 @@ export default function HomePage() {
         )}
       </div>
 
-      {/* Upload Modal */}
-      {showModal && activeShipment && (
+      {/* ── VIEW FILES MODAL ── */}
+      {viewShipment && (
+        <div
+          className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in"
+          onClick={(e) => e.target === e.currentTarget && setViewShipment(null)}
+        >
+          <div className="bg-card border border-border rounded-2xl w-full max-w-md animate-scale-in">
+            <div className="flex items-center justify-between p-5 border-b border-border">
+              <div>
+                <h2 className="font-montserrat font-bold text-white">Документы</h2>
+                <p className="text-muted-foreground text-xs mt-0.5">{viewShipment.id} · {viewShipment.client}</p>
+              </div>
+              <button onClick={() => setViewShipment(null)} className="w-8 h-8 flex items-center justify-center rounded-lg bg-secondary hover:bg-secondary/70 transition-colors">
+                <Icon name="X" size={16} />
+              </button>
+            </div>
+            <div className="p-5 space-y-4">
+              {(["photo", "invoice"] as const).map((type) => {
+                const file = viewShipment.files.find((f) => f.file_type === type);
+                const label = type === "photo" ? "Фото товара" : "Счёт / накладная";
+                const icon = type === "photo" ? "Camera" : "FileText";
+                return (
+                  <div key={type}>
+                    <p className="text-xs text-muted-foreground mb-2 font-medium">{label}</p>
+                    {file ? (
+                      <div
+                        className="relative rounded-xl overflow-hidden bg-secondary cursor-pointer group"
+                        onClick={() => setViewImg(file.url)}
+                      >
+                        <img src={file.url} alt={label} className="w-full h-40 object-cover" />
+                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                          <Icon name="ZoomIn" size={24} className="text-white" />
+                        </div>
+                        <div className="absolute bottom-2 right-2 bg-black/60 rounded-lg px-2 py-1 flex items-center gap-1">
+                          <Icon name="ExternalLink" size={12} className="text-white" />
+                          <a href={file.url} target="_blank" rel="noreferrer" className="text-white text-xs" onClick={(e) => e.stopPropagation()}>Открыть</a>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="rounded-xl bg-secondary h-24 flex flex-col items-center justify-center gap-2">
+                        <Icon name={icon} size={20} className="text-muted-foreground" />
+                        <span className="text-xs text-muted-foreground">Не загружено</span>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            <div className="p-5 pt-0">
+              <button
+                onClick={() => { setViewShipment(null); setActiveShipment(viewShipment.id); setShowUploadModal(true); }}
+                className="w-full bg-secondary text-secondary-foreground py-2.5 rounded-lg text-sm font-medium hover:bg-secondary/70 transition-colors flex items-center justify-center gap-2"
+              >
+                <Icon name="Upload" size={14} />
+                Заменить файлы
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── FULLSCREEN IMAGE ── */}
+      {viewImg && (
+        <div
+          className="fixed inset-0 bg-black/95 z-[60] flex items-center justify-center p-4 animate-fade-in"
+          onClick={() => setViewImg(null)}
+        >
+          <img src={viewImg} alt="" className="max-w-full max-h-full rounded-xl object-contain" />
+          <button onClick={() => setViewImg(null)} className="absolute top-4 right-4 w-10 h-10 bg-white/10 rounded-full flex items-center justify-center">
+            <Icon name="X" size={20} className="text-white" />
+          </button>
+        </div>
+      )}
+
+      {/* ── UPLOAD MODAL ── */}
+      {showUploadModal && activeShipment && (
         <div
           className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in"
-          onClick={(e) => e.target === e.currentTarget && !uploading && setShowModal(false)}
+          onClick={(e) => e.target === e.currentTarget && !uploading && setShowUploadModal(false)}
         >
           <div className="bg-card border border-border rounded-2xl w-full max-w-md animate-scale-in">
             <div className="flex items-center justify-between p-5 border-b border-border">
@@ -290,16 +390,13 @@ export default function HomePage() {
                 <h2 className="font-montserrat font-bold text-white">Загрузка документов</h2>
                 <p className="text-muted-foreground text-xs mt-0.5">{activeShipment}</p>
               </div>
-              <button
-                onClick={() => !uploading && setShowModal(false)}
-                className="w-8 h-8 flex items-center justify-center rounded-lg bg-secondary hover:bg-secondary/70 transition-colors"
-              >
+              <button onClick={() => !uploading && setShowUploadModal(false)} className="w-8 h-8 flex items-center justify-center rounded-lg bg-secondary hover:bg-secondary/70 transition-colors">
                 <Icon name="X" size={16} />
               </button>
             </div>
 
             <div className="p-5 space-y-4">
-              {/* Photo upload */}
+              {/* Photo */}
               <div>
                 <label className="block text-sm font-medium text-white mb-2">Фото товара</label>
                 <div
@@ -309,7 +406,7 @@ export default function HomePage() {
                   onDrop={(e) => handleDrop(e, activeShipment, "photo")}
                   onClick={() => photoRef.current?.click()}
                 >
-                  <input ref={photoRef} type="file" accept="image/*" className="hidden"
+                  <input ref={photoRef} type="file" accept="image/*" capture="environment" className="hidden"
                     onChange={(e) => e.target.files?.[0] && handleFile(activeShipment, "photo", e.target.files[0])} />
                   {current.photo ? (
                     <div className="flex items-center justify-center gap-2 text-green-400">
@@ -321,15 +418,15 @@ export default function HomePage() {
                       <div className="w-10 h-10 rounded-xl bg-secondary flex items-center justify-center">
                         <Icon name="Camera" size={20} className="text-primary" />
                       </div>
-                      <span className="text-sm text-muted-foreground">Перетащите или нажмите</span>
+                      <span className="text-sm text-muted-foreground">Сфотографировать или выбрать</span>
                     </div>
                   )}
                 </div>
               </div>
 
-              {/* Invoice upload */}
+              {/* Invoice — только фото */}
               <div>
-                <label className="block text-sm font-medium text-white mb-2">Счёт / накладная</label>
+                <label className="block text-sm font-medium text-white mb-2">Счёт / накладная <span className="text-muted-foreground font-normal text-xs">(фото)</span></label>
                 <div
                   className={`upload-zone rounded-xl p-4 text-center cursor-pointer ${dragOver?.id === activeShipment && dragOver.type === "invoice" ? "drag-over" : ""}`}
                   onDragOver={(e) => { e.preventDefault(); setDragOver({ id: activeShipment, type: "invoice" }); }}
@@ -337,7 +434,7 @@ export default function HomePage() {
                   onDrop={(e) => handleDrop(e, activeShipment, "invoice")}
                   onClick={() => invoiceRef.current?.click()}
                 >
-                  <input ref={invoiceRef} type="file" accept="image/*,.pdf" className="hidden"
+                  <input ref={invoiceRef} type="file" accept="image/*" capture="environment" className="hidden"
                     onChange={(e) => e.target.files?.[0] && handleFile(activeShipment, "invoice", e.target.files[0])} />
                   {current.invoice ? (
                     <div className="flex items-center justify-center gap-2 text-green-400">
@@ -349,7 +446,7 @@ export default function HomePage() {
                       <div className="w-10 h-10 rounded-xl bg-secondary flex items-center justify-center">
                         <Icon name="FileText" size={20} className="text-primary" />
                       </div>
-                      <span className="text-sm text-muted-foreground">PDF или изображение</span>
+                      <span className="text-sm text-muted-foreground">Сфотографировать счёт</span>
                     </div>
                   )}
                 </div>
@@ -357,33 +454,20 @@ export default function HomePage() {
             </div>
 
             <div className="p-5 pt-0 flex gap-3">
-              <button
-                onClick={() => !uploading && setShowModal(false)}
-                disabled={uploading}
-                className="flex-1 bg-secondary text-secondary-foreground px-4 py-2.5 rounded-lg text-sm font-medium hover:bg-secondary/70 transition-colors disabled:opacity-40"
-              >
+              <button onClick={() => !uploading && setShowUploadModal(false)} disabled={uploading}
+                className="flex-1 bg-secondary text-secondary-foreground px-4 py-2.5 rounded-lg text-sm font-medium hover:bg-secondary/70 transition-colors disabled:opacity-40">
                 Отмена
               </button>
-              <button
-                onClick={handleAttach}
-                disabled={!current.photo || !current.invoice || uploading}
-                className="flex-1 bg-primary text-primary-foreground px-4 py-2.5 rounded-lg text-sm font-semibold hover:bg-primary/90 transition-all disabled:opacity-40 disabled:cursor-not-allowed glow-orange-sm flex items-center justify-center gap-2"
-              >
-                {uploading ? (
-                  <>
-                    <Icon name="Loader" size={14} className="animate-spin" />
-                    Загружаю...
-                  </>
-                ) : (
-                  "Прикрепить"
-                )}
+              <button onClick={handleAttach} disabled={!current.photo || !current.invoice || uploading}
+                className="flex-1 bg-primary text-primary-foreground px-4 py-2.5 rounded-lg text-sm font-semibold hover:bg-primary/90 transition-all disabled:opacity-40 disabled:cursor-not-allowed glow-orange-sm flex items-center justify-center gap-2">
+                {uploading ? (<><Icon name="Loader" size={14} className="animate-spin" />Загружаю...</>) : "Прикрепить"}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* New Shipment Modal */}
+      {/* ── NEW SHIPMENT MODAL ── */}
       {showNewModal && (
         <div
           className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in"
@@ -392,61 +476,37 @@ export default function HomePage() {
           <div className="bg-card border border-border rounded-2xl w-full max-w-md animate-scale-in">
             <div className="flex items-center justify-between p-5 border-b border-border">
               <h2 className="font-montserrat font-bold text-white">Новая отгрузка</h2>
-              <button
-                onClick={() => !newSaving && setShowNewModal(false)}
-                className="w-8 h-8 flex items-center justify-center rounded-lg bg-secondary hover:bg-secondary/70 transition-colors"
-              >
+              <button onClick={() => !newSaving && setShowNewModal(false)} className="w-8 h-8 flex items-center justify-center rounded-lg bg-secondary hover:bg-secondary/70 transition-colors">
                 <Icon name="X" size={16} />
               </button>
             </div>
-
             <div className="p-5 space-y-3">
               <div>
                 <label className="block text-xs font-medium text-muted-foreground mb-1">Номер отгрузки *</label>
-                <input
-                  className="w-full bg-secondary border border-border rounded-lg px-3 py-2.5 text-sm text-white placeholder:text-muted-foreground focus:outline-none focus:border-primary transition-colors"
-                  placeholder="ОТГ-2024-042"
-                  value={newForm.id}
-                  onChange={(e) => setNewForm((f) => ({ ...f, id: e.target.value }))}
-                />
+                <input className="w-full bg-secondary border border-border rounded-lg px-3 py-2.5 text-sm text-white placeholder:text-muted-foreground focus:outline-none focus:border-primary transition-colors"
+                  placeholder="ОТГ-2024-042" value={newForm.id} onChange={(e) => setNewForm((f) => ({ ...f, id: e.target.value }))} />
               </div>
               <div>
                 <label className="block text-xs font-medium text-muted-foreground mb-1">Клиент *</label>
-                <input
-                  className="w-full bg-secondary border border-border rounded-lg px-3 py-2.5 text-sm text-white placeholder:text-muted-foreground focus:outline-none focus:border-primary transition-colors"
-                  placeholder="ООО «Название»"
-                  value={newForm.client}
-                  onChange={(e) => setNewForm((f) => ({ ...f, client: e.target.value }))}
-                />
+                <input className="w-full bg-secondary border border-border rounded-lg px-3 py-2.5 text-sm text-white placeholder:text-muted-foreground focus:outline-none focus:border-primary transition-colors"
+                  placeholder='ООО «Название»' value={newForm.client} onChange={(e) => setNewForm((f) => ({ ...f, client: e.target.value }))} />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-muted-foreground mb-1">Дата *</label>
-                  <input
-                    className="w-full bg-secondary border border-border rounded-lg px-3 py-2.5 text-sm text-white placeholder:text-muted-foreground focus:outline-none focus:border-primary transition-colors"
-                    placeholder="06 мая 2026"
-                    value={newForm.date}
-                    onChange={(e) => setNewForm((f) => ({ ...f, date: e.target.value }))}
-                  />
+                  <input className="w-full bg-secondary border border-border rounded-lg px-3 py-2.5 text-sm text-white placeholder:text-muted-foreground focus:outline-none focus:border-primary transition-colors"
+                    placeholder="06 мая 2026" value={newForm.date} onChange={(e) => setNewForm((f) => ({ ...f, date: e.target.value }))} />
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-muted-foreground mb-1">Позиций</label>
-                  <input
-                    type="number"
-                    className="w-full bg-secondary border border-border rounded-lg px-3 py-2.5 text-sm text-white placeholder:text-muted-foreground focus:outline-none focus:border-primary transition-colors"
-                    placeholder="0"
-                    value={newForm.items}
-                    onChange={(e) => setNewForm((f) => ({ ...f, items: e.target.value }))}
-                  />
+                  <input type="number" className="w-full bg-secondary border border-border rounded-lg px-3 py-2.5 text-sm text-white placeholder:text-muted-foreground focus:outline-none focus:border-primary transition-colors"
+                    placeholder="0" value={newForm.items} onChange={(e) => setNewForm((f) => ({ ...f, items: e.target.value }))} />
                 </div>
               </div>
               <div>
                 <label className="block text-xs font-medium text-muted-foreground mb-1">Статус</label>
-                <select
-                  className="w-full bg-secondary border border-border rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-primary transition-colors"
-                  value={newForm.status}
-                  onChange={(e) => setNewForm((f) => ({ ...f, status: e.target.value }))}
-                >
+                <select className="w-full bg-secondary border border-border rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-primary transition-colors"
+                  value={newForm.status} onChange={(e) => setNewForm((f) => ({ ...f, status: e.target.value }))}>
                   <option value="pending">Ожидает</option>
                   <option value="transit">В пути</option>
                   <option value="delivered">Доставлено</option>
@@ -454,33 +514,18 @@ export default function HomePage() {
               </div>
               {newError && (
                 <p className="text-xs text-red-400 flex items-center gap-1.5">
-                  <Icon name="AlertCircle" size={13} />
-                  {newError}
+                  <Icon name="AlertCircle" size={13} />{newError}
                 </p>
               )}
             </div>
-
             <div className="p-5 pt-0 flex gap-3">
-              <button
-                onClick={() => !newSaving && setShowNewModal(false)}
-                disabled={newSaving}
-                className="flex-1 bg-secondary text-secondary-foreground px-4 py-2.5 rounded-lg text-sm font-medium hover:bg-secondary/70 transition-colors disabled:opacity-40"
-              >
+              <button onClick={() => !newSaving && setShowNewModal(false)} disabled={newSaving}
+                className="flex-1 bg-secondary text-secondary-foreground px-4 py-2.5 rounded-lg text-sm font-medium hover:bg-secondary/70 transition-colors disabled:opacity-40">
                 Отмена
               </button>
-              <button
-                onClick={handleCreateShipment}
-                disabled={newSaving}
-                className="flex-1 bg-primary text-primary-foreground px-4 py-2.5 rounded-lg text-sm font-semibold hover:bg-primary/90 transition-all disabled:opacity-40 glow-orange-sm flex items-center justify-center gap-2"
-              >
-                {newSaving ? (
-                  <>
-                    <Icon name="Loader" size={14} className="animate-spin" />
-                    Создаю...
-                  </>
-                ) : (
-                  "Создать"
-                )}
+              <button onClick={handleCreateShipment} disabled={newSaving}
+                className="flex-1 bg-primary text-primary-foreground px-4 py-2.5 rounded-lg text-sm font-semibold hover:bg-primary/90 transition-all disabled:opacity-40 glow-orange-sm flex items-center justify-center gap-2">
+                {newSaving ? (<><Icon name="Loader" size={14} className="animate-spin" />Создаю...</>) : "Создать"}
               </button>
             </div>
           </div>
