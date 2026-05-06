@@ -49,6 +49,17 @@ function fileToBase64(file: File): Promise<string> {
   });
 }
 
+const TODAY = new Date().toLocaleDateString("ru-RU", { day: "2-digit", month: "long", year: "numeric" });
+
+interface NewShipmentForm {
+  id: string;
+  client: string;
+  date: string;
+  items: string;
+  amount: string;
+  status: string;
+}
+
 export default function HomePage() {
   const [shipments, setShipments] = useState<Shipment[]>([]);
   const [loading, setLoading] = useState(true);
@@ -59,6 +70,11 @@ export default function HomePage() {
   const [dragOver, setDragOver] = useState<{ id: string; type: string } | null>(null);
   const photoRef = useRef<HTMLInputElement>(null);
   const invoiceRef = useRef<HTMLInputElement>(null);
+
+  const [showNewModal, setShowNewModal] = useState(false);
+  const [newForm, setNewForm] = useState<NewShipmentForm>({ id: "", client: "", date: TODAY, items: "", amount: "", status: "pending" });
+  const [newSaving, setNewSaving] = useState(false);
+  const [newError, setNewError] = useState("");
 
   const fetchShipments = async () => {
     setLoading(true);
@@ -71,6 +87,36 @@ export default function HomePage() {
   useEffect(() => {
     fetchShipments();
   }, []);
+
+  const handleCreateShipment = async () => {
+    if (!newForm.id.trim() || !newForm.client.trim() || !newForm.date.trim()) {
+      setNewError("Заполните номер, клиента и дату");
+      return;
+    }
+    setNewSaving(true);
+    setNewError("");
+    const res = await fetch(SHIPMENTS_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: newForm.id.trim(),
+        client: newForm.client.trim(),
+        date: newForm.date.trim(),
+        items: parseInt(newForm.items) || 0,
+        amount: newForm.amount.trim() || "0 ₽",
+        status: newForm.status,
+      }),
+    });
+    const data = await res.json();
+    setNewSaving(false);
+    if (!res.ok) {
+      setNewError(data.error || "Ошибка при создании");
+      return;
+    }
+    setShowNewModal(false);
+    setNewForm({ id: "", client: "", date: TODAY, items: "", amount: "", status: "pending" });
+    fetchShipments();
+  };
 
   const handleOpenUpload = (shipmentId: string) => {
     setActiveShipment(shipmentId);
@@ -149,7 +195,7 @@ export default function HomePage() {
         </div>
         <button
           className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-lg font-semibold text-sm hover:bg-primary/90 transition-all glow-orange-sm hover:glow-orange"
-          onClick={() => alert("Создание отгрузки будет настроено")}
+          onClick={() => { setNewError(""); setShowNewModal(true); }}
         >
           <Icon name="Plus" size={16} />
           Новая отгрузка
@@ -336,6 +382,121 @@ export default function HomePage() {
                   </>
                 ) : (
                   "Прикрепить"
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* New Shipment Modal */}
+      {showNewModal && (
+        <div
+          className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in"
+          onClick={(e) => e.target === e.currentTarget && !newSaving && setShowNewModal(false)}
+        >
+          <div className="bg-card border border-border rounded-2xl w-full max-w-md animate-scale-in">
+            <div className="flex items-center justify-between p-5 border-b border-border">
+              <h2 className="font-montserrat font-bold text-white">Новая отгрузка</h2>
+              <button
+                onClick={() => !newSaving && setShowNewModal(false)}
+                className="w-8 h-8 flex items-center justify-center rounded-lg bg-secondary hover:bg-secondary/70 transition-colors"
+              >
+                <Icon name="X" size={16} />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-3">
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">Номер отгрузки *</label>
+                <input
+                  className="w-full bg-secondary border border-border rounded-lg px-3 py-2.5 text-sm text-white placeholder:text-muted-foreground focus:outline-none focus:border-primary transition-colors"
+                  placeholder="ОТГ-2024-042"
+                  value={newForm.id}
+                  onChange={(e) => setNewForm((f) => ({ ...f, id: e.target.value }))}
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">Клиент *</label>
+                <input
+                  className="w-full bg-secondary border border-border rounded-lg px-3 py-2.5 text-sm text-white placeholder:text-muted-foreground focus:outline-none focus:border-primary transition-colors"
+                  placeholder="ООО «Название»"
+                  value={newForm.client}
+                  onChange={(e) => setNewForm((f) => ({ ...f, client: e.target.value }))}
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-muted-foreground mb-1">Дата *</label>
+                  <input
+                    className="w-full bg-secondary border border-border rounded-lg px-3 py-2.5 text-sm text-white placeholder:text-muted-foreground focus:outline-none focus:border-primary transition-colors"
+                    placeholder="06 мая 2026"
+                    value={newForm.date}
+                    onChange={(e) => setNewForm((f) => ({ ...f, date: e.target.value }))}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-muted-foreground mb-1">Позиций</label>
+                  <input
+                    type="number"
+                    className="w-full bg-secondary border border-border rounded-lg px-3 py-2.5 text-sm text-white placeholder:text-muted-foreground focus:outline-none focus:border-primary transition-colors"
+                    placeholder="0"
+                    value={newForm.items}
+                    onChange={(e) => setNewForm((f) => ({ ...f, items: e.target.value }))}
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-muted-foreground mb-1">Сумма</label>
+                  <input
+                    className="w-full bg-secondary border border-border rounded-lg px-3 py-2.5 text-sm text-white placeholder:text-muted-foreground focus:outline-none focus:border-primary transition-colors"
+                    placeholder="0 ₽"
+                    value={newForm.amount}
+                    onChange={(e) => setNewForm((f) => ({ ...f, amount: e.target.value }))}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-muted-foreground mb-1">Статус</label>
+                  <select
+                    className="w-full bg-secondary border border-border rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-primary transition-colors"
+                    value={newForm.status}
+                    onChange={(e) => setNewForm((f) => ({ ...f, status: e.target.value }))}
+                  >
+                    <option value="pending">Ожидает</option>
+                    <option value="transit">В пути</option>
+                    <option value="delivered">Доставлено</option>
+                  </select>
+                </div>
+              </div>
+              {newError && (
+                <p className="text-xs text-red-400 flex items-center gap-1.5">
+                  <Icon name="AlertCircle" size={13} />
+                  {newError}
+                </p>
+              )}
+            </div>
+
+            <div className="p-5 pt-0 flex gap-3">
+              <button
+                onClick={() => !newSaving && setShowNewModal(false)}
+                disabled={newSaving}
+                className="flex-1 bg-secondary text-secondary-foreground px-4 py-2.5 rounded-lg text-sm font-medium hover:bg-secondary/70 transition-colors disabled:opacity-40"
+              >
+                Отмена
+              </button>
+              <button
+                onClick={handleCreateShipment}
+                disabled={newSaving}
+                className="flex-1 bg-primary text-primary-foreground px-4 py-2.5 rounded-lg text-sm font-semibold hover:bg-primary/90 transition-all disabled:opacity-40 glow-orange-sm flex items-center justify-center gap-2"
+              >
+                {newSaving ? (
+                  <>
+                    <Icon name="Loader" size={14} className="animate-spin" />
+                    Создаю...
+                  </>
+                ) : (
+                  "Создать"
                 )}
               </button>
             </div>
